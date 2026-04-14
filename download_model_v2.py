@@ -4,7 +4,7 @@ import os
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--type', '-t', type=str, default="modelscope")
+    parser.add_argument('--type', '-t', type=str, default="huggingface")
     args = parser.parse_args()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
@@ -13,7 +13,7 @@ if __name__ == '__main__':
         os.makedirs(model_dir)
     if args.type == "huggingface":
         from huggingface_hub import snapshot_download
-        model_name = "Logics-MLLM/Logics-Parsing-v2"
+        model_name = "xzgz/Logics-Parsing-v2"
         snapshot_download(repo_id=model_name, local_dir=model_dir, local_dir_use_symlinks=False, resume_download=True)
     elif args.type == "modelscope":
         from modelscope import snapshot_download
