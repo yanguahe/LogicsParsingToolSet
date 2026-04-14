@@ -12,6 +12,11 @@
 #       the install inside it. <workdir> is the host path mounted into the
 #       container (used as -v and -w).
 #
+#   ./install_logics_parsing.sh [--inference-only] <container_name>
+#   ./install_logics_parsing.sh --create [--inference-only] <workdir> <container_name>
+#       With --inference-only, only run inference_v2.py (no pip/aiter/download).
+#       The flag may appear anywhere before the positional arguments.
+#
 # Environment (optional):
 #   LOGICS_ROOT   Root of Logics-Parsing repo (default: directory containing this script)
 #   AITER_REMOTE  Git URL for aiter (default: git@github.com:yanguahe/aiter.git)
@@ -31,11 +36,11 @@ readonly DOCKER_IMAGE="${DOCKER_IMAGE:-rocm/pytorch:rocm7.1_ubuntu24.04_py3.12_p
 usage() {
   cat <<EOF
 Usage:
-  $0 <container_name>
-      Install into an already running container.
+  $0 [--inference-only] <container_name>
+      Full install into a running container, or only run inference_v2.py if --inference-only.
 
-  $0 --create <workdir> <container_name>
-      Create and start a new container, then install. Requires host workdir and container name.
+  $0 --create [--inference-only] <workdir> <container_name>
+      Create and start a new container, then full install or inference-only.
 
 Environment:
   LOGICS_ROOT=$LOGICS_ROOT (override to point at the repo checkout)
@@ -112,6 +117,36 @@ echo "[container] Appended Git convenience aliases to $BASHRC"
 ALIASES_EOF
 }
 
+run_inference_in_container() {
+  local container="$1"
+  if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
+    echo "[error] Container '$container' is not running. Start it first." >&2
+    exit 1
+  fi
+
+  local weights_path="$LOGICS_ROOT/weights/Logics-Parsing-v2"
+
+  echo "[info] Running inference only inside '$container' ..."
+
+  docker exec -i "$container" bash -s <<INF_EOF
+set -euo pipefail
+
+export HF_HUB_ENABLE_HF_TRANSFER=0
+
+cd "$LOGICS_ROOT"
+echo "[container] inference (demo1, demo2, demo3) ..."
+for n in 1 2 3; do
+  echo "[container] inference_v2.py demo\${n} ..."
+  python3 inference_v2.py --image_path "demo_input_output/demo\${n}.png" --output_path "demo_input_output/output_demo\${n}" --model_path "$weights_path"
+done
+
+echo "[container] compare_demo_mmd.py (output_demo* vs base) ..."
+python3 compare_demo_mmd.py --dir demo_input_output
+
+echo "[container] Inference done."
+INF_EOF
+}
+
 run_install_in_container() {
   local container="$1"
   if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
@@ -149,8 +184,14 @@ python3 -m pip install flash-attn==2.8.3 --no-build-isolation
 echo "[container] download_model_v2.py (Hugging Face) ..."
 python3 download_model_v2.py --type huggingface
 
-echo "[container] sample inference ..."
-python3 inference_v2.py --image_path "$LOGICS_ROOT/demo_input_output/demo.png" --output_path "$LOGICS_ROOT/demo_input_output/output_demo" --model_path "$weights_path"
+echo "[container] sample inference (demo1, demo2, demo3) ..."
+for n in 1 2 3; do
+  echo "[container] inference_v2.py demo\${n} ..."
+  python3 inference_v2.py --image_path "demo_input_output/demo\${n}.png" --output_path "demo_input_output/output_demo\${n}" --model_path "$weights_path"
+done
+
+echo "[container] compare_demo_mmd.py (output_demo* vs base) ..."
+python3 compare_demo_mmd.py --dir demo_input_output
 
 echo "[container] Done."
 INSTALL_EOF
@@ -159,6 +200,17 @@ INSTALL_EOF
 }
 
 main() {
+  local inference_only=0
+  local -a positionals=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --inference-only) inference_only=1 ;;
+      *) positionals+=("$arg") ;;
+    esac
+  done
+  set -- "${positionals[@]}"
+
   if [[ $# -lt 1 ]]; then
     usage
   fi
@@ -178,13 +230,26 @@ main() {
       "$workdir"|"$workdir"/*) ;;
       *) echo "[warn] LOGICS_ROOT ($LOGICS_ROOT) is not under workdir ($workdir). Mount may not include the repo." >&2 ;;
     esac
-    ensure_aiter_clone
-    docker_run_new_container "$workdir" "$container_name"
-    run_install_in_container "$container_name"
+    if [[ "$inference_only" -eq 1 ]]; then
+      docker_run_new_container "$workdir" "$container_name"
+      run_inference_in_container "$container_name"
+    else
+      ensure_aiter_clone
+      docker_run_new_container "$workdir" "$container_name"
+      run_install_in_container "$container_name"
+    fi
   else
+    if [[ $# -ne 1 ]]; then
+      echo "[error] Expected <container_name> (optionally after stripping --inference-only)" >&2
+      usage
+    fi
     container_name="$1"
-    ensure_aiter_clone
-    run_install_in_container "$container_name"
+    if [[ "$inference_only" -eq 1 ]]; then
+      run_inference_in_container "$container_name"
+    else
+      ensure_aiter_clone
+      run_install_in_container "$container_name"
+    fi
   fi
 
   echo "[info] All steps finished for container: $container_name"
