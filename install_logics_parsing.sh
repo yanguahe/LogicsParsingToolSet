@@ -84,6 +84,34 @@ docker_run_new_container() {
     sleep infinity
 }
 
+# Ensure root's ~/.bashrc in the container has Git convenience aliases (idempotent).
+ensure_root_bashrc_git_aliases() {
+  local container="$1"
+  docker exec -i "$container" bash -s <<'ALIASES_EOF'
+set -euo pipefail
+BASHRC=/root/.bashrc
+touch "$BASHRC"
+if grep -q "^alias gst='git status'" "$BASHRC" 2>/dev/null; then
+  echo "[container] Root ~/.bashrc already has alias gst; skipping git alias block."
+  exit 0
+fi
+cat >> "$BASHRC" <<'EOF'
+
+# Git convenience aliases
+alias gst='git status'
+alias gsth='git status | head'
+alias gstt='git status | tail'
+alias glog='git log | head'
+alias gb='git branch'
+alias gc='git checkout'
+alias fomm='git fetch origin master:master'
+alias rebhm='git rebase HEAD^ HEAD --onto=master'
+alias phhd='git push origin HEAD:refs/for/master'
+EOF
+echo "[container] Appended Git convenience aliases to $BASHRC"
+ALIASES_EOF
+}
+
 run_install_in_container() {
   local container="$1"
   if ! docker ps --format '{{.Names}}' | grep -qx "$container"; then
@@ -126,6 +154,8 @@ python3 inference_v2.py --image_path "$LOGICS_ROOT/demo_input_output/demo.png" -
 
 echo "[container] Done."
 INSTALL_EOF
+
+  ensure_root_bashrc_git_aliases "$container"
 }
 
 main() {
