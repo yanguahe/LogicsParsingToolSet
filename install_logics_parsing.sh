@@ -122,7 +122,7 @@ echo "[container] download_model_v2.py (Hugging Face) ..."
 python3 download_model_v2.py --type huggingface
 
 echo "[container] sample inference ..."
-python3 inference_v2.py --image_path "$LOGICS_ROOT/imgs/demo.png" --output_path "$LOGICS_ROOT/output_demo" --model_path "$weights_path"
+python3 inference_v2.py --image_path "$LOGICS_ROOT/demo_input_output/demo.png" --output_path "$LOGICS_ROOT/demo_input_output/output_demo" --model_path "$weights_path"
 
 echo "[container] Done."
 INSTALL_EOF
