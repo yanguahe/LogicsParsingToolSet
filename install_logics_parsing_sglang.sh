@@ -288,8 +288,8 @@ echo "[container] setup_sglang_rocm_container.sh ..."
 cd "$LOGICS_ROOT"
 bash setup_sglang_rocm_container.sh
 
-echo "[container] install demo post-processing dependency ..."
-python3 -m pip install opencv-python
+echo "[container] install PDF/demo post-processing dependencies ..."
+python3 -m pip install opencv-python PyMuPDF
 
 if [[ -f "$weights_path/config.json" ]]; then
   echo "[container] weights already present at $weights_path"

@@ -1,2 +1,6 @@
 # Local model weights (use Hugging Face: xzgz/Logics-Parsing-v2 or download script)
 weights/
+
+# Generated PDF page images / intermediate outputs under demo_pdfs/
+demo_pdfs/**/page_images/
+demo_pdfs/**/raw_output/

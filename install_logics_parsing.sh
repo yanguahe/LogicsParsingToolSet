@@ -178,7 +178,7 @@ python3 setup.py develop
 
 echo "[container] Logics-Parsing Python dependencies ..."
 cd "$LOGICS_ROOT"
-python3 -m pip install transformers==4.57.1 accelerate==1.0.0 opencv-python pillow huggingface_hub modelscope
+python3 -m pip install transformers==4.57.1 accelerate==1.0.0 opencv-python pillow huggingface_hub modelscope PyMuPDF
 python3 -m pip install flash-attn==2.8.3 --no-build-isolation
 
 echo "[container] download_model_v2.py (Hugging Face) ..."

@@ -3,24 +3,64 @@
 Batch process PDF pages with Logics-Parsing v2 via SGLang API.
 Uses OpenAI-compatible API instead of local model loading.
 Supports concurrent inference for multiple pages.
+
+Run after starting the SGLang server, for example:
+  bash run_sglang_logics_server.sh
+
+Examples using PDFs under demo_pdfs/:
+  python3 run_logics_parsing_api.py \
+    --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+    --output_dir "demo_pdfs/03-MemoryHierarchy"
+
+  python3 run_logics_parsing_api.py \
+    --pdf_path "demo_pdfs/2020-04-14 - Memory, IO, and CU Architecture on gfx9 GPUs.pdf" \
+    --output_dir "demo_pdfs/gfx9-memory-io-cu"
+
+  python3 run_logics_parsing_api.py \
+    --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+    --output_dir "demo_pdfs/03-MemoryHierarchy-pages-1-5" \
+    --start_page 1 \
+    --end_page 5 \
+    --concurrency 8
+
+  python3 run_logics_parsing_api.py \
+    --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+    --output_dir "demo_pdfs/03-MemoryHierarchy" \
+    --combine_only
 """
 
 import os
 import sys
 import time
 import argparse
-import fitz  # PyMuPDF
-import re
-import cv2
-import base64
-import json
-import urllib.request
-import urllib.error
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import re
+
+from inference_sglang_openai import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_MODEL_PATH,
+    DEFAULT_REPETITION_PENALTY,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
+    _image_file_data_url,
+    _request_json,
+    _resolve_effective_decoding,
+    _resolve_served_model_name,
+)
 
 
 def pdf_to_images(pdf_path, output_dir, dpi=150):
     """Convert PDF pages to PNG images."""
+    try:
+        import fitz  # PyMuPDF  # pyright: ignore[reportMissingImports]
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "PyMuPDF is required for PDF rasterization. Install it with "
+            "`python3 -m pip install PyMuPDF` in the runtime environment."
+        ) from exc
+
     os.makedirs(output_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
     image_paths = []
@@ -39,6 +79,8 @@ def pdf_to_images(pdf_path, output_dir, dpi=150):
 
 def extract_and_save_figures(html_output, image_path, output_dir, page_num):
     """Extract figure bounding boxes from HTML output and crop from original image."""
+    import cv2  # pyright: ignore[reportMissingImports]
+
     img = cv2.imread(image_path)
     if img is None:
         return html_output
@@ -215,47 +257,61 @@ def split_and_index(combined_md_path, output_dir, pages_per_file, pdf_basename):
     )
 
 
-def image_to_base64_url(image_path):
-    """Read image file and convert to base64 data URL."""
-    with open(image_path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode("utf-8")
-    return f"data:image/png;base64,{b64}"
+def normalize_openai_base_url(base_url):
+    """Accept either http://host:port or http://host:port/v1."""
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return base_url
+    return base_url + "/v1"
 
 
-def call_sglang_api(image_path, api_url, max_tokens=16384, repetition_penalty=1.05):
-    """Send image to SGLang API and get response."""
-    b64_url = image_to_base64_url(image_path)
-
+def call_sglang_api(
+    *,
+    image_path,
+    base_url,
+    api_key,
+    model,
+    prompt,
+    max_tokens,
+    temperature,
+    top_p,
+    repetition_penalty,
+    request_overrides,
+):
+    """Send one page image to the SGLang OpenAI-compatible API."""
     payload = {
-        "model": "Logics-Parsing-v2",
+        "model": model,
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": b64_url}},
-                    {"type": "text", "text": "QwenVL HTML"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": _image_file_data_url(Path(image_path))},
+                    },
+                    {"type": "text", "text": prompt},
                 ],
             }
         ],
         "max_tokens": max_tokens,
+        "temperature": temperature,
         "repetition_penalty": repetition_penalty,
     }
+    if top_p is not None:
+        payload["top_p"] = top_p
+    payload.update(request_overrides)
 
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{api_url}/v1/chat/completions",
-        data=data,
-        headers={"Content-Type": "application/json"},
+    result = _request_json(
+        base_url=base_url,
+        path="/chat/completions",
+        api_key=api_key,
+        payload=payload,
     )
 
-    resp = urllib.request.urlopen(req, timeout=600)
-    result = json.loads(resp.read().decode("utf-8"))
-
-    content = result["choices"][0]["message"]["content"]
+    message = ((result.get("choices") or [{}])[0].get("message") or {})
+    content = message.get("content")
     if content is None:
-        # Some models return reasoning_content instead of content
-        content = result["choices"][0]["message"].get("reasoning_content", "")
+        content = message.get("reasoning_content", "")
     if content is None:
         content = ""
     usage = result.get("usage", {})
@@ -299,7 +355,7 @@ def process_page(
     raw_dir,
     figures_dir,
     output_dir,
-    api_url,
+    request_config,
     qwenvl_cast_html_tag,
 ):
     """Process a single page: call API, extract figures, convert to markdown."""
@@ -314,7 +370,7 @@ def process_page(
     t0 = time.time()
 
     try:
-        raw_html, usage = call_sglang_api(img_path, api_url)
+        raw_html, usage = call_sglang_api(image_path=img_path, **request_config)
     except Exception as e:
         print(f"  ERROR on page {page_num}: {e}")
         return page_num, False
@@ -357,8 +413,46 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pdf_path", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--api_url", type=str, default="http://localhost:30000")
+    parser.add_argument(
+        "--base_url",
+        "--api_url",
+        dest="base_url",
+        type=str,
+        default=os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:30000/v1"),
+        help="OpenAI-compatible SGLang base URL. Accepts either ...:port or ...:port/v1.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=os.environ.get("SGLANG_MODEL"),
+        help="Model id exposed by /v1/models. If omitted, auto-detect the first served model.",
+    )
+    parser.add_argument(
+        "--model_path",
+        type=Path,
+        default=Path(os.environ.get("MODEL_PATH", str(DEFAULT_MODEL_PATH))),
+        help="Weight dir for reading generation_config and matching inference_v2 decode behavior.",
+    )
     parser.add_argument("--dpi", type=int, default=200)
+    parser.add_argument("--prompt", type=str, default="QwenVL HTML")
+    parser.add_argument("--max_tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
+    parser.add_argument("--top_p", type=float, default=DEFAULT_TOP_P)
+    parser.add_argument(
+        "--decode_mode",
+        choices=("hf-equivalent", "sampling"),
+        default=os.environ.get("SGLANG_DECODE_MODE", "hf-equivalent"),
+        help=(
+            "hf-equivalent: match inference_v2.py effective decode behavior. "
+            "sampling: send temperature/top_p literally to SGLang."
+        ),
+    )
+    parser.add_argument(
+        "--repetition_penalty",
+        type=float,
+        default=DEFAULT_REPETITION_PENALTY,
+        help="Match inference_v2 model.generate repetition_penalty (default 1.05).",
+    )
     parser.add_argument(
         "--start_page", type=int, default=1, help="Start from this page (1-indexed)"
     )
@@ -405,6 +499,34 @@ def main():
     from inference_v2 import qwenvl_cast_html_tag
 
     if not args.combine_only:
+        base_url = normalize_openai_base_url(args.base_url)
+        api_key = os.environ.get("OPENAI_API_KEY", "EMPTY")
+        model = _resolve_served_model_name(base_url, api_key, args.model)
+        temperature, top_p, request_overrides = _resolve_effective_decoding(
+            model_path=args.model_path,
+            decode_mode=args.decode_mode,
+            temperature=args.temperature,
+            top_p=args.top_p,
+        )
+
+        if args.decode_mode == "hf-equivalent" and temperature == 0.0 and top_p is None:
+            print(
+                "[info] generation_config.do_sample is false; using greedy SGLang decode to match inference_v2.py",
+                file=sys.stderr,
+            )
+
+        request_config = {
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": model,
+            "prompt": args.prompt,
+            "max_tokens": args.max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "repetition_penalty": args.repetition_penalty,
+            "request_overrides": request_overrides,
+        }
+
         # Step 1: Convert PDF to images
         print("=" * 60)
         print(f"Step 1: Converting PDF to images (DPI={args.dpi})...")
@@ -415,14 +537,18 @@ def main():
 
         # Step 2: Verify API is available
         print("=" * 60)
-        print(f"Step 2: Verifying SGLang API at {args.api_url}...")
+        print(f"Step 2: Verifying SGLang API at {base_url}...")
         print("=" * 60)
         try:
-            resp = urllib.request.urlopen(f"{args.api_url}/v1/models", timeout=10)
-            models = json.loads(resp.read().decode("utf-8"))
+            models = _request_json(
+                base_url=base_url,
+                path="/models",
+                api_key=api_key,
+                timeout=10.0,
+            )
             print(f"API OK. Models: {[m['id'] for m in models['data']]}")
         except Exception as e:
-            print(f"ERROR: Cannot reach SGLang API at {args.api_url}: {e}")
+            print(f"ERROR: Cannot reach SGLang API at {base_url}: {e}")
             sys.exit(1)
 
         # Step 3: Run inference (concurrent)
@@ -454,7 +580,7 @@ def main():
                     raw_dir,
                     figures_dir,
                     args.output_dir,
-                    args.api_url,
+                    request_config,
                     qwenvl_cast_html_tag,
                 )
                 futures[future] = page_num
