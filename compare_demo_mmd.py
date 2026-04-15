@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
 Compare Mermaid/text outputs in demo_input_output/ for each demo N in {1,2,3}:
-  - output_demoN.mmd          vs output_demoN_base.mmd
-  - output_demoN_raw.mmd      vs output_demoN_base_raw.mmd
+  - output_demoN_raw.mmd          vs output_demoN_base_raw.mmd        (group 1)
+  - output_demoN_sglang_raw.mmd   vs output_demoN_base_raw.mmd        (group 2)
   Missing files are skipped with [skip].
+
+After per-pair reports, prints group means for:
+  - Group 1: output_demoN_raw vs output_demoN_base_raw
+  - Group 2: output_demoN_sglang_raw vs output_demoN_base_raw
+  (Means use only pairs that were actually compared, not skipped.)
 
 Metrics (text-oriented, no third-party deps):
   - byte_sha256_equal        exact file identity
@@ -17,6 +22,8 @@ Metrics (text-oriented, no third-party deps):
 Usage:
   python3 compare_demo_mmd.py
   python3 compare_demo_mmd.py --dir /path/to/demo_input_output
+  python3 compare_demo_mmd.py --groups 1
+  python3 compare_demo_mmd.py --groups 1 2
 """
 
 import argparse
@@ -25,7 +32,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 # HTML / snippet: data-bbox="left,top,right,bottom" (comma-separated integers)
 BBOX_PATTERN = re.compile(
@@ -262,6 +269,67 @@ def print_report(m: PairMetrics) -> None:
     print()
 
 
+def print_group_mean_report(title: str, items: List[PairMetrics]) -> None:
+    """Mean of per-pair metrics (same fields as print_report / test.log) within one group."""
+    print(f"=== {title} ===")
+    if not items:
+        print("  (no pairs compared in this group)\n")
+        return
+    n = float(len(items))
+
+    def avg_int(get) -> float:
+        return sum(get(m) for m in items) / n
+
+    def avg_float(get) -> float:
+        return sum(get(m) for m in items) / n
+
+    def avg_bool(get) -> float:
+        return sum(1.0 if get(m) else 0.0 for m in items) / n
+
+    d_len = [abs(m.len_a - m.len_b) for m in items]
+    d_lines = [abs(m.lines_a - m.lines_b) for m in items]
+    mean_d_len = sum(d_len) / n
+    mean_d_lines = sum(d_lines) / n
+
+    print(
+        "  UTF-8 chars (mean):  A=%.3f  B=%.3f  |Δ|=%.3f"
+        % (avg_int(lambda m: m.len_a), avg_int(lambda m: m.len_b), mean_d_len)
+    )
+    print(
+        "  lines (mean):        A=%.3f  B=%.3f  |Δ|=%.3f"
+        % (avg_int(lambda m: m.lines_a), avg_int(lambda m: m.lines_b), mean_d_lines)
+    )
+    print("  Levenshtein (mean):           %.3f" % avg_int(lambda m: m.levenshtein))
+    print("  normalized_edit (mean):       %.6f   (0 = identical)" % avg_float(lambda m: m.normalized_edit))
+    print("  SequenceMatcher.ratio (mean):   %.6f   (1 = identical)" % avg_float(lambda m: m.seq_ratio))
+    print(
+        "  line_ndiff (mean):  equal_lines=%.3f  lines_only_in_A(-)=%.3f  lines_only_in_B(+)=%.3f"
+        % (
+            avg_int(lambda m: m.lines_equal),
+            avg_int(lambda m: m.lines_minus),
+            avg_int(lambda m: m.lines_plus),
+        )
+    )
+    print("  data-bbox (mean):")
+    print(
+        "    count:  A=%.3f  B=%.3f  paired=%.3f  extra_A=%.3f  extra_B=%.3f"
+        % (
+            avg_int(lambda m: m.bbox.count_a),
+            avg_int(lambda m: m.bbox.count_b),
+            avg_int(lambda m: m.bbox.paired),
+            avg_int(lambda m: m.bbox.extra_in_a),
+            avg_int(lambda m: m.bbox.extra_in_b),
+        )
+    )
+    print("    fraction all_tuples_identical:  %.6f   (1 = all pairs had identical bbox lists)" % avg_bool(lambda m: m.bbox.tuples_identical))
+    print("    sum_L1_over_paired_bboxes (mean):   %.3f" % avg_int(lambda m: m.bbox.total_l1))
+    print("    max_L1_single_bbox (mean):          %.3f" % avg_int(lambda m: m.bbox.max_l1_one_bbox))
+    print("    max_abs_delta_single_coord (mean):  %.3f" % avg_int(lambda m: m.bbox.max_abs_coord_delta))
+    print("    mean_rel_coord (mean):              %.6f" % avg_float(lambda m: m.bbox.mean_rel_coord))
+    print("    max_rel_coord (mean):               %.6f" % avg_float(lambda m: m.bbox.max_rel_coord))
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare demo .mmd output pairs.")
     parser.add_argument(
@@ -270,29 +338,52 @@ def main() -> None:
         default=None,
         help="Directory containing output_demo*.mmd (default: demo_input_output next to this script)",
     )
+    parser.add_argument(
+        "--groups",
+        type=int,
+        nargs="+",
+        default=[1, 2],
+        metavar="G",
+        help="Which comparison group(s) to run: 1=raw vs base_raw, 2=sglang_raw vs base_raw. Default: 1 2.",
+    )
     args = parser.parse_args()
+    active_groups: List[int] = []
+    seen: set = set()
+    for g in args.groups:
+        if g not in (1, 2):
+            parser.error("--groups values must be 1 and/or 2; got %r" % (g,))
+        if g not in seen:
+            seen.add(g)
+            active_groups.append(g)
     base = args.dir
     if base is None:
         base = Path(__file__).resolve().parent / "demo_input_output"
 
-    pairs = []
+    # Group 1: output_demoN_raw vs output_demoN_base_raw
+    # Group 2: output_demoN_sglang_raw vs output_demoN_base_raw
+    pairs: List[Tuple[int, str, Path, Path]] = []
     for n in (1, 2, 3):
         pairs.append(
             (
-                "output_demo%d vs output_demo%d_base" % (n, n),
-                base / ("output_demo%d.mmd" % n),
-                base / ("output_demo%d_base.mmd" % n),
-            )
-        )
-        pairs.append(
-            (
+                1,
                 "output_demo%d_raw vs output_demo%d_base_raw" % (n, n),
                 base / ("output_demo%d_raw.mmd" % n),
                 base / ("output_demo%d_base_raw.mmd" % n),
             )
         )
+        pairs.append(
+            (
+                2,
+                "output_demo%d_sglang_raw vs output_demo%d_base_raw" % (n, n),
+                base / ("output_demo%d_sglang_raw.mmd" % n),
+                base / ("output_demo%d_base_raw.mmd" % n),
+            )
+        )
 
-    for label, pa, pb in pairs:
+    by_group: Dict[int, List[PairMetrics]] = {1: [], 2: []}
+    for group_id, label, pa, pb in pairs:
+        if group_id not in active_groups:
+            continue
         if not pa.is_file():
             print(f"[skip] missing: {pa}")
             continue
@@ -301,6 +392,14 @@ def main() -> None:
             continue
         m = compare_pair(label, pa, pb)
         print_report(m)
+        by_group[group_id].append(m)
+
+    group_mean_titles = {
+        1: "Group 1 mean (output_demoN_raw vs output_demoN_base_raw, N=1..3)",
+        2: "Group 2 mean (output_demoN_sglang_raw vs output_demoN_base_raw, N=1..3)",
+    }
+    for gid in active_groups:
+        print_group_mean_report(group_mean_titles[gid], by_group[gid])
 
     print(
         "Notes:\n"

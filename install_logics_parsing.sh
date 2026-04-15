@@ -141,7 +141,7 @@ for n in 1 2 3; do
 done
 
 echo "[container] compare_demo_mmd.py (output_demo* vs base) ..."
-python3 compare_demo_mmd.py --dir demo_input_output
+python3 compare_demo_mmd.py --dir demo_input_output --groups 1
 
 echo "[container] Inference done."
 INF_EOF
@@ -191,7 +191,7 @@ for n in 1 2 3; do
 done
 
 echo "[container] compare_demo_mmd.py (output_demo* vs base) ..."
-python3 compare_demo_mmd.py --dir demo_input_output
+python3 compare_demo_mmd.py --dir demo_input_output --groups 1
 
 echo "[container] Done."
 INSTALL_EOF
