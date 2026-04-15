@@ -1,0 +1,88 @@
+=== output_demo1_sglang_raw vs output_demo1_base_raw ===
+  A: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo1_sglang_raw.mmd
+  B: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo1_base_raw.mmd
+  byte_identical (raw bytes):     False
+  sha256 A: 0a5deaa38781ff9a…
+  sha256 B: 3fe369b5fa01780a…
+  UTF-8 chars:  A=692  B=747  |Δ|=55
+  lines:        A=7  B=8  |Δ|=1
+  Levenshtein (char edits):     102
+  normalized_edit (lev/maxlen): 0.136546   (0 = identical)
+  SequenceMatcher.ratio:         0.833912   (1 = identical)
+  line_ndiff:  equal_lines=1  lines_only_in_A(-)=6  lines_only_in_B(+)=7
+  data-bbox (four integers per attribute, document order):
+    count:  A=7  B=8  paired=7  extra_A=0  extra_B=1
+    all_tuples_identical:        False
+    sum_L1_over_paired_bboxes:   766   (Manhattan distance per quad, summed)
+    max_L1_single_bbox:          431
+    max_abs_delta_single_coord:   207   (max |Δ| among the four numbers)
+    mean_rel_coord:              0.208093   (mean of |A-B|/W_B for left&right, |A-B|/H_B for top&bottom; 28 values)
+    max_rel_coord:               2.617021   (max of those; W_B=|right-left|, H_B=|bottom-top| on B)
+
+=== output_demo2_sglang_raw vs output_demo2_base_raw ===
+  A: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo2_sglang_raw.mmd
+  B: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo2_base_raw.mmd
+  byte_identical (raw bytes):     False
+  sha256 A: 6ef665f6e232b461…
+  sha256 B: 55efc4593ddf40e1…
+  UTF-8 chars:  A=1620  B=1620  |Δ|=0
+  lines:        A=16  B=16  |Δ|=0
+  Levenshtein (char edits):     37
+  normalized_edit (lev/maxlen): 0.022840   (0 = identical)
+  SequenceMatcher.ratio:         0.967901   (1 = identical)
+  line_ndiff:  equal_lines=1  lines_only_in_A(-)=15  lines_only_in_B(+)=15
+  data-bbox (four integers per attribute, document order):
+    count:  A=16  B=16  paired=16  extra_A=0  extra_B=0
+    all_tuples_identical:        False
+    sum_L1_over_paired_bboxes:   414   (Manhattan distance per quad, summed)
+    max_L1_single_bbox:          345
+    max_abs_delta_single_coord:   280   (max |Δ| among the four numbers)
+    mean_rel_coord:              0.088786   (mean of |A-B|/W_B for left&right, |A-B|/H_B for top&bottom; 64 values)
+    max_rel_coord:               2.555556   (max of those; W_B=|right-left|, H_B=|bottom-top| on B)
+
+=== output_demo3_sglang_raw vs output_demo3_base_raw ===
+  A: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo3_sglang_raw.mmd
+  B: /mnt/raid0/heyanguang/code/Logics-Parsing/demo_input_output/output_demo3_base_raw.mmd
+  byte_identical (raw bytes):     False
+  sha256 A: 5428c4c2c0561943…
+  sha256 B: c00bd9be2fdb5c73…
+  UTF-8 chars:  A=6353  B=6792  |Δ|=439
+  lines:        A=54  B=60  |Δ|=6
+  Levenshtein (char edits):     1333
+  normalized_edit (lev/maxlen): 0.196260   (0 = identical)
+  SequenceMatcher.ratio:         0.846101   (1 = identical)
+  line_ndiff:  equal_lines=6  lines_only_in_A(-)=48  lines_only_in_B(+)=54
+  data-bbox (four integers per attribute, document order):
+    count:  A=55  B=61  paired=55  extra_A=0  extra_B=6
+    all_tuples_identical:        False
+    sum_L1_over_paired_bboxes:   10057   (Manhattan distance per quad, summed)
+    max_L1_single_bbox:          2309
+    max_abs_delta_single_coord:   950   (max |Δ| among the four numbers)
+    mean_rel_coord:              1.515538   (mean of |A-B|/W_B for left&right, |A-B|/H_B for top&bottom; 220 values)
+    max_rel_coord:               86.363636   (max of those; W_B=|right-left|, H_B=|bottom-top| on B)
+
+=== Group 2 mean (output_demoN_sglang_raw vs output_demoN_base_raw, N=1..3) ===
+  UTF-8 chars (mean):  A=2888.333  B=3053.000  |Δ|=164.667
+  lines (mean):        A=25.667  B=28.000  |Δ|=2.333
+  Levenshtein (mean):           490.667
+  normalized_edit (mean):       0.118549   (0 = identical)
+  SequenceMatcher.ratio (mean):   0.882638   (1 = identical)
+  line_ndiff (mean):  equal_lines=2.667  lines_only_in_A(-)=23.000  lines_only_in_B(+)=25.333
+  data-bbox (mean):
+    count:  A=26.000  B=28.333  paired=26.000  extra_A=0.000  extra_B=2.333
+    fraction all_tuples_identical:  0.000000   (1 = all pairs had identical bbox lists)
+    sum_L1_over_paired_bboxes (mean):   3745.667
+    max_L1_single_bbox (mean):          1028.333
+    max_abs_delta_single_coord (mean):  479.000
+    mean_rel_coord (mean):              0.604139
+    max_rel_coord (mean):               30.512071
+
+Notes:
+  • normalized_edit: single-number rough dissimilarity (char-level).
+  • SequenceMatcher.ratio: difflib similarity on full strings (good for prose).
+  • line_ndiff: coarse line presence; small line edits count as -/+ pairs.
+  • data-bbox: quads parsed from data-bbox="…"; compared in extraction order.
+    sum_L1 / max_L1 / max_abs_delta apply only to the first min(count) pairs.
+    Relative error vs B: quad is left,top,right,bottom; left/right use W_B=|right-left|;
+      top/bottom use H_B=|bottom-top|; denominators from B, min 1 px. A=first file, B=second.
+
