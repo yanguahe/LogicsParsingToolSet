@@ -15,6 +15,7 @@
 #   ./install_logics_parsing_sglang.sh --install hyg_trn_rocm7.1
 #   ./install_logics_parsing_sglang.sh --install-and-start-server hyg_trn_rocm7.1
 #   ./install_logics_parsing_sglang.sh --start-server --dp-size 2 --port 30000 hyg_trn_rocm7.1
+#   ./install_logics_parsing_sglang.sh --start-server --dp-size 8 hyg_trn_rocm7.1 -- --enable-deterministic-inference
 #   ./install_logics_parsing_sglang.sh --run-demo --port 30000 hyg_trn_rocm7.1
 #   ./install_logics_parsing_sglang.sh --create /mnt/raid0/heyanguang/code/Logics-Parsing --dp-size 2 hyg_trn_rocm7.1
 #
@@ -50,8 +51,8 @@ SERVER_LOG_BASENAME="${SERVER_LOG_BASENAME:-sglsv.log}"
 usage() {
   cat <<EOF
 Usage:
-  $0 [--install] [--start-server] [--install-and-start-server] [--run-demo] [--dp-size N] [--port P] <container_name>
-  $0 --create <workdir> [--install] [--start-server] [--install-and-start-server] [--run-demo] [--dp-size N] [--port P] <container_name>
+  $0 [--install] [--start-server] [--install-and-start-server] [--run-demo] [--dp-size N] [--port P] <container_name> [-- extra run_sglang_logics_server.sh args]
+  $0 --create <workdir> [--install] [--start-server] [--install-and-start-server] [--run-demo] [--dp-size N] [--port P] <container_name> [-- extra run_sglang_logics_server.sh args]
 
 Actions:
   --install                    Build the ROCm + SGLang inference environment in the container
@@ -68,6 +69,7 @@ Options:
   --create <workdir>  Create and start a container with <workdir> mounted host:host
   --dp-size <n>       SGLang data parallel size for server startup (default: $SGLANG_DP_SIZE)
   --port, -p <n>      SGLang server port (default: $SGLANG_PORT)
+  --                  Pass remaining args through to run_sglang_logics_server.sh
   -h, --help          Show this help
 
 Environment:
@@ -306,6 +308,8 @@ start_server_in_container() {
   local container="$1"
   local port="$2"
   local dp_size="$3"
+  shift 3
+  local -a server_passthrough=("$@")
   require_running_container "$container"
   ensure_runtime_installed_in_container "$container"
 
@@ -318,10 +322,14 @@ start_server_in_container() {
   local kill_script_path="$LOGICS_ROOT/kill_sglang_logics_server.sh"
   local docker_exec_status=0
   local interrupted=0
+  local quoted_passthrough=""
+  if ((${#server_passthrough[@]} > 0)); then
+    printf -v quoted_passthrough ' %q' "${server_passthrough[@]}"
+  fi
   echo "[info] Starting SGLang server in '$container' (port=$port, dp-size=$dp_size) ..."
   trap 'interrupted=1' INT TERM
   set +e
-  docker exec "$container" bash -lc "set -o pipefail && cd \"$LOGICS_ROOT\" && bash run_sglang_logics_server.sh --port \"$port\" --dp-size \"$dp_size\" 2>&1 | tee \"$server_log_path\""
+  docker exec "$container" bash -lc "set -o pipefail && cd \"$LOGICS_ROOT\" && bash run_sglang_logics_server.sh --port \"$port\" --dp-size \"$dp_size\"${quoted_passthrough} 2>&1 | tee \"$server_log_path\""
   docker_exec_status=$?
   set -e
   trap - INT TERM
@@ -372,6 +380,7 @@ main() {
   local do_install_and_start_server=0
   local dp_size="$SGLANG_DP_SIZE"
   local port="$SGLANG_PORT"
+  local -a server_passthrough=()
   local -a positionals=()
 
   while [[ $# -gt 0 ]]; do
@@ -411,6 +420,11 @@ main() {
       --port|-p)
         port="${2:?--port requires a value}"
         shift 2
+        ;;
+      --)
+        shift
+        server_passthrough+=("$@")
+        break
         ;;
       -h|--help)
         usage
@@ -468,7 +482,7 @@ main() {
     run_install_in_container "$container_name"
   fi
   if (( do_start_server )); then
-    start_server_in_container "$container_name" "$port" "$dp_size"
+    start_server_in_container "$container_name" "$port" "$dp_size" "${server_passthrough[@]}"
   fi
   if (( do_run_demo )); then
     run_demo_in_container "$container_name" "$port"

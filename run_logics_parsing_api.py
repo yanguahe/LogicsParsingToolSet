@@ -13,14 +13,17 @@ Run after starting the SGLang server, for example:
 Examples using PDFs under demo_pdfs/:
   python3 run_logics_parsing_api.py \
     --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
-    --output_dir "demo_pdfs/03-MemoryHierarchy"
+    --output_dir "demo_pdfs/03-MemoryHierarchy" \
+    --port 33157
 
   python3 run_logics_parsing_api.py \
     --pdf_path "demo_pdfs/2020-04-14 - Memory, IO, and CU Architecture on gfx9 GPUs.pdf" \
-    --output_dir "demo_pdfs/gfx9-memory-io-cu"
+    --output_dir "demo_pdfs/gfx9-memory-io-cu" \
+    --port 33157
 
   python3 run_logics_parsing_api.py \
     --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+    --port 33157 \
     --output_dir "demo_pdfs/03-MemoryHierarchy-pages-1-5" \
     --start_page 1 \
     --end_page 5 \

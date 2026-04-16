@@ -25,9 +25,10 @@ Uses a ``urllib`` opener with ``ProxyHandler({})`` so ``HTTP_PROXY`` does not br
 ``127.0.0.1``.
 
 Examples:
-  python3 inference_sglang_openai.py
+  python3 inference_sglang_openai.py --port 33157
 
   python3 inference_sglang_openai.py \\
+    --port 33157 \\
     --image_path demo_input_output/demo1.png \\
     --output_path demo_input_output/output_demo1
 """
