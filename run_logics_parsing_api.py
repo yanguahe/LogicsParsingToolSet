@@ -4,6 +4,9 @@ Batch process PDF pages with Logics-Parsing v2 via SGLang API.
 Uses OpenAI-compatible API instead of local model loading.
 Supports concurrent inference for multiple pages.
 
+Run this script inside the ROCm / SGLang container where the runtime dependencies
+are installed and the target server is reachable, not on the bare host.
+
 Run after starting the SGLang server, for example:
   bash run_sglang_logics_server.sh
 
@@ -41,13 +44,17 @@ import re
 from inference_sglang_openai import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL_PATH,
+    DEFAULT_OPENAI_HOST,
+    DEFAULT_OPENAI_PORT,
     DEFAULT_REPETITION_PENALTY,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     _image_file_data_url,
     _request_json,
+    _resolve_openai_port,
     _resolve_effective_decoding,
     _resolve_served_model_name,
+    build_openai_base_url,
 )
 
 
@@ -257,14 +264,6 @@ def split_and_index(combined_md_path, output_dir, pages_per_file, pdf_basename):
     )
 
 
-def normalize_openai_base_url(base_url):
-    """Accept either http://host:port or http://host:port/v1."""
-    base_url = base_url.rstrip("/")
-    if base_url.endswith("/v1"):
-        return base_url
-    return base_url + "/v1"
-
-
 def call_sglang_api(
     *,
     image_path,
@@ -414,12 +413,15 @@ def main():
     parser.add_argument("--pdf_path", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument(
-        "--base_url",
-        "--api_url",
-        dest="base_url",
-        type=str,
-        default=os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:30000/v1"),
-        help="OpenAI-compatible SGLang base URL. Accepts either ...:port or ...:port/v1.",
+        "--port",
+        type=int,
+        default=None,
+        help=(
+            "SGLang server port. Base URL is derived as "
+            f"http://{DEFAULT_OPENAI_HOST}:<port>/v1. If omitted, use "
+            "$OPENAI_PORT, then $SGLANG_PORT, then the port from $OPENAI_BASE_URL, else "
+            f"{DEFAULT_OPENAI_PORT}."
+        ),
     )
     parser.add_argument(
         "--model",
@@ -499,7 +501,11 @@ def main():
     from inference_v2 import qwenvl_cast_html_tag
 
     if not args.combine_only:
-        base_url = normalize_openai_base_url(args.base_url)
+        try:
+            port = _resolve_openai_port(args.port)
+        except ValueError as exc:
+            parser.error(str(exc))
+        base_url = build_openai_base_url(port)
         api_key = os.environ.get("OPENAI_API_KEY", "EMPTY")
         model = _resolve_served_model_name(base_url, api_key, args.model)
         temperature, top_p, request_overrides = _resolve_effective_decoding(

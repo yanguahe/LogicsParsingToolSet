@@ -315,8 +315,29 @@ start_server_in_container() {
   fi
 
   local server_log_path="$LOGICS_ROOT/$SERVER_LOG_BASENAME"
+  local kill_script_path="$LOGICS_ROOT/kill_sglang_logics_server.sh"
+  local docker_exec_status=0
+  local interrupted=0
   echo "[info] Starting SGLang server in '$container' (port=$port, dp-size=$dp_size) ..."
+  trap 'interrupted=1' INT TERM
+  set +e
   docker exec "$container" bash -lc "set -o pipefail && cd \"$LOGICS_ROOT\" && bash run_sglang_logics_server.sh --port \"$port\" --dp-size \"$dp_size\" 2>&1 | tee \"$server_log_path\""
+  docker_exec_status=$?
+  set -e
+  trap - INT TERM
+
+  if (( interrupted != 0 || docker_exec_status == 130 || docker_exec_status == 143 )); then
+    echo
+    echo "[info] Start command interrupted; cleaning up residual SGLang processes on port $port ..."
+    if [[ -x "$kill_script_path" ]]; then
+      "$kill_script_path" --port "$port" "$container" || true
+    else
+      echo "[warn] Missing executable kill helper: $kill_script_path" >&2
+    fi
+    return 130
+  fi
+
+  return "$docker_exec_status"
 }
 
 run_demo_in_container() {

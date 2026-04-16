@@ -5,6 +5,9 @@ Compare Mermaid/text outputs in demo_input_output/ for each demo N in {1,2,3}:
   - output_demoN_sglang_raw.mmd   vs output_demoN_base_raw.mmd        (group 2)
   Missing files are skipped with [skip].
 
+Run this script inside the same ROCm / SGLang container where the demo outputs
+were generated, so the expected files and Python environment are consistent.
+
 After per-pair reports, prints group means for:
   - Group 1: output_demoN_raw vs output_demoN_base_raw
   - Group 2: output_demoN_sglang_raw vs output_demoN_base_raw

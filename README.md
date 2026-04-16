@@ -588,6 +588,158 @@ python download_model_v2.py -t huggingface
 python3 inference_v2.py --image_path PATH_TO_INPUT_IMG --output_path PATH_TO_OUTPUT --model_path PATH_TO_MODEL
 ```
 
+## Script Usage
+
+The repository includes several helper scripts for two common workflows:
+
+- Local / Hugging Face inference with `inference_v2.py`
+- ROCm + SGLang deployment, demo validation, and PDF batch processing
+
+### `install_logics_parsing.sh`
+
+Use this script for the local `inference_v2.py` workflow inside a ROCm PyTorch container. It can either install the runtime or only run the demo inference/compare stage.
+
+Common examples:
+
+```shell
+./install_logics_parsing.sh hyg_trn_rocm7.1
+./install_logics_parsing.sh --create /mnt/raid0/heyanguang/code/Logics-Parsing hyg_trn_rocm7.1
+./install_logics_parsing.sh --inference-only hyg_trn_rocm7.1
+```
+
+What it does:
+
+- Ensures the local `aiter` checkout exists
+- Installs the editable `aiter` package in the container
+- Downloads `weights/Logics-Parsing-v2` if needed
+- Runs `inference_v2.py` on `demo_input_output/demo{1,2,3}.png`
+- Compares the generated raw outputs against the base reference with `compare_demo_mmd.py --groups 1`
+
+### `install_logics_parsing_sglang.sh`
+
+Use this script to build and manage the ROCm + SGLang deployment for `Logics-Parsing-v2`. The script works from the host side and executes the actual setup/server commands inside the target container.
+
+Main actions:
+
+- `--install`: install the SGLang runtime in the container
+- `--start-server`: start the SGLang server in the foreground
+- `--install-and-start-server`: install first, then start the server
+- `--run-demo`: run demo inference through the OpenAI-compatible SGLang API and compare with base outputs
+
+Common examples:
+
+```shell
+./install_logics_parsing_sglang.sh hyg_trn_rocm7.1
+./install_logics_parsing_sglang.sh --install hyg_trn_rocm7.1
+./install_logics_parsing_sglang.sh --install-and-start-server hyg_trn_rocm7.1
+./install_logics_parsing_sglang.sh --start-server --dp-size 8 --port 33157 hyg_trn_rocm7.1
+./install_logics_parsing_sglang.sh --run-demo --port 33157 hyg_trn_rocm7.1
+./install_logics_parsing_sglang.sh --create /mnt/raid0/heyanguang/code/Logics-Parsing --dp-size 2 hyg_trn_rocm7.1
+```
+
+Notes:
+
+- If no action flag is given, the default action is `--install-and-start-server`
+- `--run-demo` must be used alone
+- `--dp-size` controls the SGLang data-parallel size
+- The script uses the `sglang` branch `gb.v0.5.6.post2`
+
+### `kill_sglang_logics_server.sh`
+
+Use this script to stop a running SGLang server inside a container from another terminal. It targets the server by `container_name + port`, sends `SIGINT` first, then escalates to `SIGTERM` and `SIGKILL` only if needed.
+
+Common examples:
+
+```shell
+./kill_sglang_logics_server.sh hyg_trn_rocm7.1
+./kill_sglang_logics_server.sh --port 33157 hyg_trn_rocm7.1
+```
+
+This is useful when:
+
+- The server was started with `install_logics_parsing_sglang.sh --start-server`
+- `Ctrl+C` left residual child processes in the container
+- You want to stop the server without killing the whole container
+
+### `inference_sglang_openai.py`
+
+This script calls a running SGLang server through its OpenAI-compatible API. It is aligned with `inference_v2.py` in decoding behavior and uses the original image bytes as the request payload.
+
+Run this script inside the ROCm / SGLang container where the inference dependencies are installed and the server is reachable.
+
+Common examples:
+
+```shell
+python3 inference_sglang_openai.py --port 33157
+
+python3 inference_sglang_openai.py \
+  --port 33157 \
+  --image_path demo_input_output/demo1.png \
+  --output_path demo_input_output/output_demo1
+```
+
+Behavior:
+
+- If `--image_path` is omitted, it runs on `demo_input_output/demo1.png`, `demo2.png`, and `demo3.png`
+- Auto-generated demo outputs use the `_sglang` suffix, for example `output_demo1_sglang_raw.mmd`
+- The server URL is derived from `--port` as `http://127.0.0.1:<port>/v1`
+
+### `compare_demo_mmd.py`
+
+This script compares generated Mermaid / raw `.mmd` outputs against the base reference files in `demo_input_output/`.
+
+Run this script inside the same ROCm / SGLang container where the demo outputs were generated.
+
+Comparison groups:
+
+- Group 1: `output_demoN_raw.mmd` vs `output_demoN_base_raw.mmd`
+- Group 2: `output_demoN_sglang_raw.mmd` vs `output_demoN_base_raw.mmd`
+
+Common examples:
+
+```shell
+python3 compare_demo_mmd.py
+python3 compare_demo_mmd.py --dir demo_input_output --groups 1
+python3 compare_demo_mmd.py --dir demo_input_output --groups 2
+python3 compare_demo_mmd.py --dir demo_input_output --groups 1 2
+```
+
+The report includes exact-match checks, edit-distance-style metrics, line-wise diff statistics, and `data-bbox` comparisons.
+
+### `run_logics_parsing_api.py`
+
+This script batch-processes PDF pages via the running SGLang API, converts the page-level HTML-like outputs into Markdown, and optionally splits large outputs into smaller page ranges with an index.
+
+Run this script inside the ROCm / SGLang container where the API runtime dependencies are installed and the target server is reachable.
+
+Common examples:
+
+```shell
+python3 run_logics_parsing_api.py \
+  --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+  --output_dir "demo_pdfs/03-MemoryHierarchy" \
+  --port 33157
+
+python3 run_logics_parsing_api.py \
+  --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+  --output_dir "demo_pdfs/03-MemoryHierarchy-pages-1-5" \
+  --port 33157 \
+  --start_page 1 \
+  --end_page 5 \
+  --concurrency 8
+
+python3 run_logics_parsing_api.py \
+  --pdf_path "demo_pdfs/03-MemoryHierarchy.pdf" \
+  --output_dir "demo_pdfs/03-MemoryHierarchy" \
+  --combine_only
+```
+
+Notes:
+
+- The server URL is derived from `--port` as `http://127.0.0.1:<port>/v1`
+- `--combine_only` skips API inference and only re-combines previously generated raw outputs
+- This script requires PDF rasterization support (`PyMuPDF`) and figure cropping support (`opencv-python`)
+
 
 ## Showcases
 

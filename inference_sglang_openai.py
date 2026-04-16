@@ -2,6 +2,9 @@
 """
 Call a running SGLang server (OpenAI-compatible) for Logics-Parsing-style inference.
 
+Run this script inside the ROCm / SGLang container where the runtime dependencies
+are installed and the target server is reachable, not on the bare host.
+
 This script matches the *effective* behavior of ``inference_v2.py`` for Logics-Parsing-v2.
 That HF path passes ``temperature``/``top_p`` into ``model.generate()``, but the public
 ``generation_config.json`` keeps ``do_sample`` disabled, so the actual decode path is greedy
@@ -38,6 +41,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_DEMO_DIR = REPO_ROOT / "demo_input_output"
@@ -48,6 +52,40 @@ DEFAULT_MAX_TOKENS = 16384
 DEFAULT_TEMPERATURE = 0.1
 DEFAULT_TOP_P = 0.5
 DEFAULT_REPETITION_PENALTY = 1.05
+DEFAULT_OPENAI_HOST = "127.0.0.1"
+DEFAULT_OPENAI_PORT = 30000
+
+
+def _resolve_openai_port(port: Optional[int]) -> int:
+    if port is not None:
+        return port
+
+    for env_name in ("OPENAI_PORT", "SGLANG_PORT"):
+        value = os.environ.get(env_name)
+        if not value:
+            continue
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"Environment variable {env_name} must be an integer port, got {value!r}."
+            ) from exc
+
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    if base_url:
+        parsed = urlparse(base_url if "://" in base_url else f"http://{base_url}")
+        if parsed.port is not None:
+            return parsed.port
+        raise ValueError(
+            "Environment variable OPENAI_BASE_URL must include an explicit port, "
+            f"got {base_url!r}."
+        )
+
+    return DEFAULT_OPENAI_PORT
+
+
+def build_openai_base_url(port: int) -> str:
+    return f"http://{DEFAULT_OPENAI_HOST}:{port}/v1"
 
 
 def _image_file_data_url(image_path: Path) -> str:
@@ -226,8 +264,15 @@ def main() -> None:
         description="OpenAI-compatible client for SGLang Logics-Parsing server (aligned with inference_v2).",
     )
     p.add_argument(
-        "--base_url",
-        default=os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:30000/v1"),
+        "--port",
+        type=int,
+        default=None,
+        help=(
+            "SGLang server port. Base URL is derived as "
+            f"http://{DEFAULT_OPENAI_HOST}:<port>/v1. If omitted, use "
+            "$OPENAI_PORT, then $SGLANG_PORT, then the port from $OPENAI_BASE_URL, else "
+            f"{DEFAULT_OPENAI_PORT}."
+        ),
     )
     p.add_argument(
         "--model",
@@ -279,8 +324,14 @@ def main() -> None:
     )
     args = p.parse_args()
 
+    try:
+        port = _resolve_openai_port(args.port)
+    except ValueError as exc:
+        p.error(str(exc))
+    base_url = build_openai_base_url(port)
+
     api_key = os.environ.get("OPENAI_API_KEY", "EMPTY")
-    model = _resolve_served_model_name(args.base_url, api_key, args.model)
+    model = _resolve_served_model_name(base_url, api_key, args.model)
     temperature, top_p, request_overrides = _resolve_effective_decoding(
         model_path=args.model_path,
         decode_mode=args.decode_mode,
@@ -295,7 +346,7 @@ def main() -> None:
         )
 
     common_kw = dict(
-        base_url=args.base_url,
+        base_url=base_url,
         api_key=api_key,
         model=model,
         prompt=args.prompt,
